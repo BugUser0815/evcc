@@ -1,0 +1,21 @@
+template: efacec-qc45
+products:
+  - brand: Efacec
+    description:
+      generic: QC45
+capabilities: ["meter", "dim"]
+requirements:
+  description:
+    de: |
+      Der Efacec QC45 muss über das lokale Netzwerk erreichbar sein.
+      Bei Geräten mit mehreren DC-Anschlüssen den zu steuernden Anschluss über `connector` auswählen.
+    en: |
+      The Efacec QC45 must be reachable via the local network.
+      For devices with multiple DC connectors, select the connector to control using `connector`.
+params:
+  - name: host
+  - name: connector
+render: |
+  type: efacec-qc45
+  uri: {{ .host }}
+  connector: {{ .connector }}
