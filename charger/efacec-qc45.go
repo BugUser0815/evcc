@@ -161,9 +161,14 @@ func (c *EfacecQC45) Enable(bool) error {
 }
 
 // MaxCurrent converts evcc's current target into the QC45's integer kW budget.
+// A zero current target maps to a zero power budget; positive targets are
+// clamped to the charger's supported minimum and maximum power.
 func (c *EfacecQC45) MaxCurrent(current int64) error {
-	kw := int(math.Ceil(float64(current) * math.Sqrt(3) * 400 / 1000))
-	kw = max(5, min(c.maxPowerKW(), kw))
+	kw := 0
+	if current > 0 {
+		kw = int(math.Ceil(float64(current) * math.Sqrt(3) * 400 / 1000))
+		kw = max(5, min(c.maxPowerKW(), kw))
+	}
 
 	_, err := c.conn.WriteSingleRegister(c.budgetRegister(), uint16(kw))
 	if err == nil {
