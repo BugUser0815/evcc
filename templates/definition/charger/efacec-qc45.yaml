@@ -9,11 +9,11 @@ requirements:
     de: |
       Experimentelle Modbus-TCP-Integration für den Efacec QC45.
       Auf der Ladestation muss der QC45 Modbus-Bridge-Dienst laufen. OCPP/ChargePoint bleibt für Autorisierung sowie Start/Stop zuständig; evcc regelt die verfügbare Ladeleistung.
-      Modus "dc" steuert den jeweils aktiven CHAdeMO- oder CCS-Anschluss gemeinsam über das DC-Budget. Modus "type2" steuert den 22-kW-Type2-Anschluss.
+      Modus "dc" steuert den jeweils aktiven CHAdeMO- oder CCS-Anschluss gemeinsam über das DC-Budget. Modus "type2" steuert den 43-kW-Type2-Anschluss.
     en: |
       Experimental Modbus TCP integration for the Efacec QC45.
       The QC45 Modbus bridge service must be running on the charger. OCPP/ChargePoint remains responsible for authorization and transaction start/stop; evcc controls the available charging power.
-      Mode "dc" controls the currently active CHAdeMO or CCS connector through the shared DC budget. Mode "type2" controls the 22 kW Type2 connector.
+      Mode "dc" controls the currently active CHAdeMO or CCS connector through the shared DC budget. Mode "type2" controls the 43 kW Type2 connector.
   evcc: []
 caveats:
   - description:

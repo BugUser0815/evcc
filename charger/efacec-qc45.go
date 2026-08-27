@@ -30,7 +30,7 @@ const (
 // embedded Modbus/TCP bridge running inside the QC45 EVCSD/Tomcat JVM.
 //
 // mode "dc" controls the logical DC output (CHAdeMO or CCS, mutually exclusive)
-// via register 110. mode "type2" controls the 22kW Type2 output via register 111.
+// via register 110. mode "type2" controls the 43kW Type2 output via register 111.
 //
 // OCPP remains responsible for authorization and transaction start/stop. evcc
 // controls the available charging power through the Modbus budget registers.
@@ -140,7 +140,7 @@ func (c *EfacecQC45) budgetRegister() uint16 {
 
 func (c *EfacecQC45) maxPowerKW() int {
 	if c.mode == "type2" {
-		return 22
+		return 43
 	}
 	return 50
 }
