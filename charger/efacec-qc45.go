@@ -24,6 +24,15 @@ const (
 	qc45RegType2Power         = 101
 	qc45RegDCBudget           = 110
 	qc45RegACBudget           = 111
+
+	// Extended read-only telemetry exported by the native-integration bridge.
+	// Identifier blocks contain one length register followed by 16 registers
+	// carrying up to 32 ASCII bytes (two bytes per register).
+	qc45RegDCIdentifier       = 146
+	qc45RegType2Identifier    = 163
+	qc45IdentifierRegisters   = 17
+	qc45RegDCPhaseCurrents     = 180 // 3 registers, 0.1 A: L1/L2/L3
+	qc45RegType2PhaseCurrents = 183 // 3 registers, 0.1 A: L1/L2/L3
 )
 
 // EfacecQC45 implements evcc control for the Efacec QC45 through the
@@ -138,6 +147,20 @@ func (c *EfacecQC45) budgetRegister() uint16 {
 	return qc45RegDCBudget
 }
 
+func (c *EfacecQC45) identifierRegister() uint16 {
+	if c.mode == "type2" {
+		return qc45RegType2Identifier
+	}
+	return qc45RegDCIdentifier
+}
+
+func (c *EfacecQC45) phaseCurrentRegister() uint16 {
+	if c.mode == "type2" {
+		return qc45RegType2PhaseCurrents
+	}
+	return qc45RegDCPhaseCurrents
+}
+
 func (c *EfacecQC45) maxPowerKW() int {
 	if c.mode == "type2" {
 		return 43
@@ -228,52 +251,73 @@ func (c *EfacecQC45) CurrentPower() (float64, error) {
 
 var _ api.Meter = (*EfacecQC45)(nil)
 
-func (c *EfacecQC45) energyRegister() (uint16, error) {
-	if c.mode == "type2" {
-		return qc45RegEnergyConnector3, nil
-	}
-
-	connector, err := c.readRegister(qc45RegDCActiveConnector)
-	if err != nil {
-		return 0, err
-	}
-	if connector == 1 || connector == 2 {
-		c.mu.Lock()
-		c.lastDCConnector = connector
-		c.mu.Unlock()
-	} else {
-		c.mu.Lock()
-		connector = c.lastDCConnector
-		c.mu.Unlock()
-	}
-
-	switch connector {
-	case 1:
-		return qc45RegEnergyConnector1, nil
-	case 2:
-		return qc45RegEnergyConnector2, nil
-	default:
-		// No DC session has been observed since this evcc process started.
-		return 0, nil
-	}
-}
-
-// TotalEnergy implements api.MeterEnergy. The QC45 bridge exposes the live
-// EVCSD energy counter as unsigned 32-bit Wh; evcc expects kWh here.
+// TotalEnergy implements api.MeterEnergy. For the logical DC charger we expose
+// the sum of the cumulative CHAdeMO and CCS meter counters. This stays useful
+// while the station is idle and after an evcc restart instead of falling back
+// to 0 until a connector becomes active. Type2 uses its own cumulative counter.
 func (c *EfacecQC45) TotalEnergy() (float64, error) {
-	reg, err := c.energyRegister()
-	if err != nil {
-		return 0, err
-	}
-	if reg == 0 {
-		return 0, nil
+	if c.mode == "type2" {
+		wh, err := c.readUint32(qc45RegEnergyConnector3)
+		if err != nil {
+			return 0, err
+		}
+		return float64(wh) / 1000, nil
 	}
 
-	wh, err := c.readUint32(reg)
+	wh1, err := c.readUint32(qc45RegEnergyConnector1)
 	if err != nil {
 		return 0, err
 	}
-	return float64(wh) / 1000, nil
+	wh2, err := c.readUint32(qc45RegEnergyConnector2)
+	if err != nil {
+		return 0, err
+	}
+
+	return float64(uint64(wh1)+uint64(wh2)) / 1000, nil
 }
 
 var _ api.MeterEnergy = (*EfacecQC45)(nil)
+
+// Identify implements api.Identifier. The native QC45 bridge exports the
+// currently known EVCSD/OCPP idTag as a length-prefixed 32-byte ASCII block.
+func (c *EfacecQC45) Identify() (string, error) {
+	b, err := c.conn.ReadHoldingRegisters(c.identifierRegister(), qc45IdentifierRegisters)
+	if err != nil {
+		return "", err
+	}
+	if len(b) != qc45IdentifierRegisters*2 {
+		return "", fmt.Errorf("unexpected identifier block length: %d", len(b))
+	}
+
+	length := int(binary.BigEndian.Uint16(b[:2]))
+	if length <= 0 {
+		return "", nil
+	}
+	if length > 32 {
+		length = 32
+	}
+
+	payload := b[2 : 2+32]
+	return strings.TrimSpace(string(payload[:length])), nil
+}
+
+var _ api.Identifier = (*EfacecQC45)(nil)
+
+// Currents implements api.PhaseCurrents. Values are exported by the native
+// bridge in 0.1 A. For DC this is the three-phase AC-input equivalent derived
+// from live charger power; Type2 uses the same three-phase representation.
+func (c *EfacecQC45) Currents() (float64, float64, float64, error) {
+	b, err := c.conn.ReadHoldingRegisters(c.phaseCurrentRegister(), 3)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	if len(b) != 6 {
+		return 0, 0, 0, fmt.Errorf("unexpected phase-current block length: %d", len(b))
+	}
+
+	return float64(binary.BigEndian.Uint16(b[0:2])) / 10,
+		float64(binary.BigEndian.Uint16(b[2:4])) / 10,
+		float64(binary.BigEndian.Uint16(b[4:6])) / 10, nil
+}
+
+var _ api.PhaseCurrents = (*EfacecQC45)(nil)
