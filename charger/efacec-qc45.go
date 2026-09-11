@@ -209,14 +209,16 @@ func (c *EfacecQC45) Status() (api.ChargeStatus, error) {
 	return api.StatusB, nil
 }
 
-// Enabled implements the api.Charger interface.
-// The QC45 Modbus bridge controls power only. Authorization and transaction
-// start/stop stay under OCPP control.
+// Enabled implements the api.Charger interface. The QC45 is reported as
+// enabled only after EVCSD/OCPP has created or authorized a charging session.
+// Before authorization evcc therefore shows "Ladebereit: Nein"; once the
+// session is released it switches to "Ja", even while charging power is still 0.
 func (c *EfacecQC45) Enabled() (bool, error) {
-	return true, nil
+	return c.sessionActive()
 }
 
 // Enable implements the api.Charger interface and is intentionally a no-op.
+// Authorization and transaction start/stop remain under OCPP/QC45 control.
 func (c *EfacecQC45) Enable(bool) error {
 	return nil
 }
