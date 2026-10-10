@@ -266,7 +266,18 @@ func (c *EfacecQC45) Enable(enabled bool) error {
 		}
 	}
 	c.evccEnabled = enabled
-	return c.writeDCPermitLocked()
+	if err := c.writeDCPermitLocked(); err != nil {
+		if enabled {
+			// evcc observed a failed enable. Do not let the background
+			// heartbeat retry a positive budget behind its back.
+			c.evccEnabled = false
+			c.requestedKw = 0
+			c.pendingAt = time.Time{}
+			_ = c.writeDCPermitLocked()
+		}
+		return err
+	}
+	return nil
 }
 
 // dcBudgetLocked is only called with c.mu held.
@@ -349,6 +360,14 @@ func (c *EfacecQC45) MaxCurrent(current int64) error {
 	c.pendingAt = time.Now()
 	actualKw := c.dcBudgetLocked()
 	err := c.writeDCPermitLocked()
+	if err != nil && c.evccEnabled {
+		// On a failed positive write, clear the local lease instead of
+		// continuing to refresh a value evcc did not see acknowledged.
+		c.requestedKw = 0
+		c.lastOfferedKw = 0
+		c.pendingAt = time.Time{}
+		_ = c.writeDCPermitLocked()
+	}
 	c.mu.Unlock()
 	if err == nil {
 		c.log.DEBUG.Printf("dc explicit permit: %dA -> %dkW (sent %dkW)", current, kw, actualKw)
