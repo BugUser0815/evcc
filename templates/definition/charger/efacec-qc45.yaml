@@ -17,8 +17,8 @@ requirements:
   evcc: []
 caveats:
   - description:
-      de: Start und Stop von Ladevorgängen werden derzeit nicht über Modbus ausgeführt. Die evcc-Freigabe ist deshalb logisch immer aktiv; die Leistungsregelung funktioniert über die Budget-Register.
-      en: Charging transaction start and stop are currently not performed over Modbus. The evcc enable state therefore remains logically active while power regulation works through the budget registers.
+      de: DC (CHAdeMO/CCS) bleibt nach Neustart und bei evcc „Aus“ gesperrt. Erst Enable(true) und eine neue positive Leistungsvorgabe schalten frei. Alle 5 Sekunden wird die Modbus-110-Freigabe erneuert; nach 30 Sekunden ohne Refresh beendet die QC45 aktive DC-Sitzungen. OCPP bleibt für Autorisierung zuständig. Type2 bleibt betreiberseitig fest eingestellt.
+      en: DC (CHAdeMO/CCS) is blocked after restart and while evcc is off. Enable(true) and a subsequent positive MaxCurrent request are both required. The driver renews Modbus register 110 every 5 seconds; after 30 seconds without renewal the QC45 stops unauthorized DC sessions. OCPP retains authorization; Type2 stays operator-fixed.
 params:
   - name: modbus
     choice: ["tcpip"]
