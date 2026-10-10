@@ -54,7 +54,8 @@ type EfacecQC45 struct {
 	ioMu            sync.Mutex // serialize Modbus reads and writes (heartbeat included)
 	lastDCConnector uint16
 	evccEnabled     bool   // explicit evcc Enable(true), never inferred from a session
-	requestedKw     uint16 // last explicit MaxCurrent; cannot release power before Enable(true)
+	requestedKw     uint16 // active requested budget; 0 while disabled
+	lastOfferedKw   uint16 // last evcc configured power, reused only on explicit re-enable
 	pendingAt       time.Time // protects against reusing old MaxCurrent values on Enable(true)
 }
 
@@ -242,7 +243,8 @@ func (c *EfacecQC45) Enabled() (bool, error) {
 
 // Enable(false) immediately revokes the DC power permit; OCPP still owns
 // transaction authorization and normal start/stop. Enable(true) alone does
-// not release energy: a fresh MaxCurrent call is also required.
+// not release energy without a power budget configured by evcc. The last
+// explicitly configured current may be reused on re-enable in one evcc session.
 func (c *EfacecQC45) Enable(enabled bool) error {
 	if c.mode != "dc" {
 		return nil // operator-fixed Type2 behaviour unchanged
@@ -256,6 +258,12 @@ func (c *EfacecQC45) Enable(enabled bool) error {
 		// evcc's loadpoint writes MaxCurrent BEFORE Enable(true). Accept
 		// that immediately preceding request, but never an old setpoint.
 		c.requestedKw = c.freshPendingBudgetLocked(time.Now())
+		if c.requestedKw == 0 {
+			// evcc skips MaxCurrent on resume when its offeredCurrent is
+			// unchanged. Reuse only the value evcc explicitly set in this
+			// driver instance, never a QC45 value from an earlier process.
+			c.requestedKw = c.lastOfferedKw
+		}
 	}
 	c.evccEnabled = enabled
 	return c.writeDCPermitLocked()
@@ -333,9 +341,11 @@ func (c *EfacecQC45) MaxCurrent(current int64) error {
 	}
 
 	c.mu.Lock()
-	// evcc calls MaxCurrent before Enable(true). Remember this fresh request,
-	// but transmit 0 while disabled. Enable(true) rejects stale requests.
+	// evcc calls MaxCurrent before Enable(true), but can also reuse an
+	// unchanged offeredCurrent after a pause. Keep the last explicitly
+	// configured power; transmit 0 while disabled.
 	c.requestedKw = uint16(kw)
+	c.lastOfferedKw = uint16(kw)
 	c.pendingAt = time.Now()
 	actualKw := c.dcBudgetLocked()
 	err := c.writeDCPermitLocked()
