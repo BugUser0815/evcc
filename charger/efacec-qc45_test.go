@@ -46,10 +46,32 @@ func TestEfacecQC45DCPermitFailClosed(t *testing.T) {
 		t.Fatal("explicit evcc enable plus fresh request should permit 35kW")
 	}
 	c.evccEnabled = false
+	c.lastOfferedKw = 35
 	c.requestedKw = 0
 	c.pendingAt = time.Time{}
 	if c.dcBudgetLocked() != 0 {
 		t.Fatal("evcc disabled must revoke DC power")
 	}
 	c.mu.Unlock()
+}
+
+func TestEfacecQC45CanResumeExplicitlyEnabledPreviousCurrent(t *testing.T) {
+	c := &EfacecQC45{mode: "dc", lastOfferedKw: 20}
+	// evcc may leave its offeredCurrent unchanged after Enable(false),
+	// and consequently call Enable(true) without another MaxCurrent.
+	c.mu.Lock()
+	c.requestedKw = c.freshPendingBudgetLocked(time.Now())
+	if c.requestedKw == 0 {
+		c.requestedKw = c.lastOfferedKw
+	}
+	c.evccEnabled = true
+	if c.dcBudgetLocked() != 20 {
+		t.Fatalf("explicit re-enable should restore evcc-configured power, got %d", c.dcBudgetLocked())
+	}
+	c.mu.Unlock()
+
+	fresh := &EfacecQC45{mode: "dc"}
+	if fresh.lastOfferedKw != 0 {
+		t.Fatal("a new driver must never inherit a QC45 power request")
+	}
 }
