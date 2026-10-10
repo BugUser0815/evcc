@@ -1,0 +1,26 @@
+name: qc45-dc-permit
+on:
+  push:
+    branches:
+      - fix/qc45-dc-explicit-permit-20261010
+  pull_request:
+    branches:
+      - QC45
+    paths:
+      - 'charger/efacec-qc45*'
+      - 'templates/definition/charger/efacec-qc45.yaml'
+      - '.github/workflows/qc45-dc-permit.yml'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Format and test the QC45 driver
+        run: |
+          gofmt -w charger/efacec-qc45.go charger/efacec-qc45_test.go
+          go test ./charger -run '^TestEfacecQC45' -count=1
