@@ -25,6 +25,7 @@ const (
 	qc45RegDCBudget           = 110
 	qc45RegACBudget           = 111
 	qc45PermitRefreshInterval = 5 * time.Second // station rejects stale DC grants after 30 s
+	qc45PendingPermitMaxAge = 10 * time.Second // evcc calls MaxCurrent immediately before Enable(true)
 
 	// Extended read-only telemetry exported by the native-integration bridge.
 	// Identifier blocks contain one length register followed by 16 registers
@@ -53,7 +54,8 @@ type EfacecQC45 struct {
 	ioMu            sync.Mutex // serialize Modbus reads and writes (heartbeat included)
 	lastDCConnector uint16
 	evccEnabled     bool   // explicit evcc Enable(true), never inferred from a session
-	requestedKw     uint16 // explicit MaxCurrent after enabling; cleared on disable
+	requestedKw     uint16 // last explicit MaxCurrent; cannot release power before Enable(true)
+	pendingAt       time.Time // protects against reusing old MaxCurrent values on Enable(true)
 }
 
 func init() {
@@ -247,16 +249,30 @@ func (c *EfacecQC45) Enable(enabled bool) error {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.evccEnabled = enabled
 	if !enabled {
 		c.requestedKw = 0
+		c.pendingAt = time.Time{}
+	} else if !c.evccEnabled {
+		// evcc's loadpoint writes MaxCurrent BEFORE Enable(true). Accept
+		// that immediately preceding request, but never an old setpoint.
+		c.requestedKw = c.freshPendingBudgetLocked(time.Now())
 	}
+	c.evccEnabled = enabled
 	return c.writeDCPermitLocked()
 }
 
 // dcBudgetLocked is only called with c.mu held.
 func (c *EfacecQC45) dcBudgetLocked() uint16 {
 	if !c.evccEnabled {
+		return 0
+	}
+	return c.requestedKw
+}
+
+// A pre-enable MaxCurrent is valid only during the immediate evcc transition.
+func (c *EfacecQC45) freshPendingBudgetLocked(now time.Time) uint16 {
+	if c.pendingAt.IsZero() || now.Before(c.pendingAt) ||
+		now.Sub(c.pendingAt) > qc45PendingPermitMaxAge {
 		return 0
 	}
 	return c.requestedKw
@@ -283,6 +299,7 @@ func (c *EfacecQC45) refreshDCPermit(ctx context.Context) {
 			c.mu.Lock()
 			c.evccEnabled = false
 			c.requestedKw = 0
+			c.pendingAt = time.Time{}
 			_ = c.writeDCPermitLocked()
 			c.mu.Unlock()
 			return
@@ -316,13 +333,10 @@ func (c *EfacecQC45) MaxCurrent(current int64) error {
 	}
 
 	c.mu.Lock()
-	// Do not retain a positive value received while disabled. Re-enabling
-	// requires a new power request rather than reusing a stale setpoint.
-	if c.evccEnabled {
-		c.requestedKw = uint16(kw)
-	} else {
-		c.requestedKw = 0
-	}
+	// evcc calls MaxCurrent before Enable(true). Remember this fresh request,
+	// but transmit 0 while disabled. Enable(true) rejects stale requests.
+	c.requestedKw = uint16(kw)
+	c.pendingAt = time.Now()
 	actualKw := c.dcBudgetLocked()
 	err := c.writeDCPermitLocked()
 	c.mu.Unlock()
